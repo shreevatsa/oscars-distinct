@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oscars Big Eight Explorer</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: #11141b;
+      --muted: #9aa3b2;
+      --text: #e6e9ef;
+      --accent: #5eead4;
+      --accent-2: #93c5fd;
+      --warn: #fbbf24;
+      --chip: #1e293b;
+      --chip-border: #2a3446;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 800px at 10% 0%, #0e1220, #0b0d12);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    .wrap { max-width: 100%; margin: 32px auto 56px; padding: 0 24px; }
+    header { display:flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+    h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.2px; margin: 0; }
+    .sub { color: var(--muted); font-size: 13px; }
+    .panel { background: linear-gradient(180deg, #121622, #0e1220); border: 1px solid #1f2736; border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+    .controls { display:grid; grid-template-columns: 1.4fr 1fr; gap:14px; padding:16px; }
+    @media (max-width: 880px){ .controls{ grid-template-columns: 1fr; } }
+    fieldset { border: 0; padding:0; margin:0; }
+    legend { font-weight:600; margin-bottom: 8px; color:#c7d2fe; }
+    .chips { display:flex; flex-wrap: wrap; gap: 8px; }
+    .chip { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius: 999px; border: 1px solid var(--chip-border); background: var(--chip); color: #dbeafe; }
+    .chip input { accent-color: var(--accent-2); }
+    .actions { display:flex; gap:8px; flex-wrap: wrap; }
+    button { cursor:pointer; border:1px solid #273246; background:#131a25; color:var(--text); padding:8px 10px; border-radius:10px; font-weight:600; }
+    button.primary { background: linear-gradient(180deg, #1b2436, #172033); border-color:#2b3a56; }
+    button:hover { filter: brightness(1.08); }
+    .hint { color:var(--muted); font-size:12px; }
+
+    .filebox { display:flex; gap:10px; align-items:center; background: #0b1322; border:1px dashed #2a3650; padding:10px; border-radius:12px; }
+
+    .tablewrap { margin-top: 18px; overflow:auto; border-radius: 14px; border: 1px solid #1f2736; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; background: #0e1320; }
+    thead th { position: sticky; top: 0; background: #0f1525; z-index: 1; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid #172133; white-space: nowrap; }
+    th { text-align:left; font-size:12px; text-transform: uppercase; letter-spacing: 0.06em; color:#9fb2d8; }
+    tbody tr:hover td { background: #0f172a; }
+    .badge { display:inline-block; font-size:11px; padding:2px 6px; border-radius:8px; border:1px solid #2b3a56; background:#0a1220; color:#9ec5fe; }
+    .count { font-weight:700; color:#bae6fd; }
+    .tie { color: var(--warn); font-weight: 600; }
+    .muted { color: var(--muted); }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#12203a; color:#a5b4fc; border:1px solid #273a6b; font-size:11px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Oscars Big Eight Explorer</h1>
+      <div class="sub">Pick any subset of the Big 8 and sort ceremonies by the <span class="count">number of distinct films</span> that won those categories (ties → most recent first).</div>
+    </header>
+
+    <div class="panel controls">
+      <fieldset>
+        <legend>Choose categories</legend>
+        <div class="chips" id="chips"></div>
+        <div class="actions" style="margin-top:8px">
+          <button id="allBtn">Select all</button>
+          <button id="clearBtn">Clear</button>
+          <button id="sixBtn" class="primary">Classic six (no writing)</button>
+          <span class="hint">Tip: hover a film to see the winner(s). Cells show all winning films if a category had a tie <span class="tie" title="Tie">(tie)</span>.</span>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Data source</legend>
+        <div class="filebox">
+          <div>
+            <div class="hint">On load, the page tries to fetch <code>full_data.csv</code> from the same folder. If that fails, select your file below.</div>
+            <div class="muted" id="loadStatus"></div>
+          </div>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="file" id="fileInput" accept=".csv,.tsv,text/csv,text/tab-separated-values" />
+          <span class="pill" id="summaryPill" title="Rows in the source file">—</span>
+        </div>
+      </fieldset>
+    </div>
+
+    <div class="tablewrap">
+      <table id="resultTable">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+(function(){
+  // ---- Constants ----
+  const BIG8 = [
+    {key: 'BEST PICTURE', label: 'Best Picture'},
+    {key: 'DIRECTING', label: 'Best Director'},
+    {key: 'ACTOR IN A LEADING ROLE', label: 'Best Actor'},
+    {key: 'ACTRESS IN A LEADING ROLE', label: 'Best Actress'},
+    {key: 'ACTOR IN A SUPPORTING ROLE', label: 'Best Supporting Actor'},
+    {key: 'ACTRESS IN A SUPPORTING ROLE', label: 'Best Supporting Actress'},
+    {key: 'WRITING (Original Screenplay)', label: 'Best Original Screenplay'},
+    {key: 'WRITING (Adapted Screenplay)', label: 'Best Adapted Screenplay'},
+  ];
+
+  // State
+  let rows = []; // parsed dataset rows
+  let winners = []; // filtered winners for BIG8
+  let ceremonyById = new Map(); // ceremony -> Year string
+
+  // Elements
+  const chips = document.getElementById('chips');
+  const resultTable = document.getElementById('resultTable');
+  const thead = resultTable.querySelector('thead');
+  const tbody = resultTable.querySelector('tbody');
+  const fileInput = document.getElementById('fileInput');
+  const allBtn = document.getElementById('allBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const sixBtn = document.getElementById('sixBtn');
+  const loadStatus = document.getElementById('loadStatus');
+  const summaryPill = document.getElementById('summaryPill');
+
+  // ---- UI: chips ----
+  BIG8.forEach(({key,label}, idx) => {
+    const id = 'chk_' + idx;
+    const el = document.createElement('label');
+    el.className = 'chip';
+    el.innerHTML = `<input type="checkbox" id="${id}" data-key="${key}"> <span>${label}</span>`;
+    chips.appendChild(el);
+  });
+  // Default to Classic Six (no writing) and render
+  setTimeout(()=> { selectPreset('six'); buildTable(); }, 0);
+
+  // ---- Event handlers ----
+  chips.addEventListener('change', e => { if(e.target && e.target.matches('input[type="checkbox"]')) buildTable(); });
+  allBtn.addEventListener('click', () => { selectPreset('all'); buildTable(); });
+  clearBtn.addEventListener('click', () => { selectPreset('none'); buildTable(); });
+  sixBtn.addEventListener('click', () => { selectPreset('six'); buildTable(); });
+  fileInput.addEventListener('change', handleFile);
+
+  function selectPreset(which){
+    const boxes = chips.querySelectorAll('input[type="checkbox"]');
+    boxes.forEach(b => b.checked = false);
+    if(which === 'all') boxes.forEach(b => b.checked = true);
+    if(which === 'six'){
+      boxes.forEach(b => {
+        const k = b.dataset.key;
+        b.checked = (
+          k === 'BEST PICTURE' ||
+          k === 'DIRECTING' ||
+          k === 'ACTOR IN A LEADING ROLE' ||
+          k === 'ACTRESS IN A LEADING ROLE' ||
+          k === 'ACTOR IN A SUPPORTING ROLE' ||
+          k === 'ACTRESS IN A SUPPORTING ROLE'
+        );
+      });
+    }
+  }
+
+  // ---- CSV/TSV parsing ----
+  async function tryFetchDefault(){
+    try {
+      const res = await fetch('full_data.csv', {cache:'no-store'});
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const text = await res.text();
+      loadStatus.textContent = 'Loaded full_data.csv via fetch.';
+      parseAndIndex(text);
+      buildTable();
+    } catch (err){
+      loadStatus.textContent = 'Could not auto-load full_data.csv. Choose a file below.';
+    }
+  }
+
+  function detectDelimiter(line){
+    const tabs = (line.match(/\t/g)||[]).length;
+    const commas = (line.match(/,/g)||[]).length;
+    return tabs > commas ? '\t' : ',';
+  }
+
+  function parseDSV(text){
+    const clean = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = clean.split('\n').filter(x => x.trim().length > 0);
+    if(lines.length === 0) return {header:[], rows:[]};
+    const delim = detectDelimiter(lines[0]);
+    const header = lines[0].split(delim).map(h => h.trim());
+    const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
+    const out = [];
+    for(let i=1;i<lines.length;i++){
+      const parts = lines[i].split(delim);
+      const obj = {};
+      header.forEach((h, j)=> obj[h] = (parts[j]??'').trim());
+      out.push(obj);
+    }
+    return {header, rows: out};
+  }
+
+  function parseAndIndex(text){
+    const {header, rows: raw} = parseDSV(text);
+    const H = Object.fromEntries(header.map(h=>[h, h]));
+
+    // Normalize expected columns; fall back if headers differ slightly
+    const col = {
+      Ceremony: header.find(h=>h.toLowerCase()==='ceremony') || 'Ceremony',
+      Year: header.find(h=>h.toLowerCase()==='year') || 'Year',
+      CanonicalCategory: header.find(h=>h.toLowerCase()==='canonicalcategory') || 'CanonicalCategory',
+      Category: header.find(h=>h.toLowerCase()==='category') || 'Category',
+      Film: header.find(h=>h.toLowerCase()==='film') || 'Film',
+      FilmId: header.find(h=>h.toLowerCase()==='filmid') || 'FilmId',
+      Name: header.find(h=>h.toLowerCase()==='name') || 'Name',
+      Nominees: header.find(h=>h.toLowerCase()==='nominees') || 'Nominees',
+      Winner: header.find(h=>h.toLowerCase()==='winner') || 'Winner',
+    };
+
+    // Coerce & index
+    rows = raw.map(r => ({
+      Ceremony: parseInt(r[col.Ceremony],10),
+      Year: r[col.Year],
+      CanonicalCategory: r[col.CanonicalCategory],
+      Category: r[col.Category],
+      Film: r[col.Film],
+      FilmId: r[col.FilmId],
+      Name: r[col.Name],
+      Nominees: r[col.Nominees],
+      Winner: /^(true|yes|1|winner)$/i.test(r[col.Winner] || ''),
+    })).filter(r => !Number.isNaN(r.Ceremony));
+
+    ceremonyById = new Map();
+    rows.forEach(r => { if(!ceremonyById.has(r.Ceremony)) ceremonyById.set(r.Ceremony, r.Year); });
+
+    winners = rows.filter(r => r.Winner && BIG8.some(c=>c.key===r.CanonicalCategory));
+    summaryPill.textContent = `${rows.length.toLocaleString()} rows • ${winners.length.toLocaleString()} winners in Big 8`;
+  }
+
+  async function handleFile(evt){
+    const file = evt.target.files && evt.target.files[0];
+    if(!file) return;
+    const text = await file.text();
+    parseAndIndex(text);
+    buildTable();
+  }
+
+  // ---- Core: Build table ----
+  function buildTable(){
+    const selected = Array.from(chips.querySelectorAll('input:checked')).map(b => b.dataset.key);
+    if(selected.length === 0){
+      thead.innerHTML = '<tr><th>Year</th><th class="muted">Pick at least one category</th></tr>';
+      tbody.innerHTML = '';
+      return;
+    }
+    // Group: ceremony -> category -> {films:Set(FilmId or Film), names:Set}
+    const byCer = new Map();
+    for(const r of winners){
+      if(!selected.includes(r.CanonicalCategory)) continue;
+      const cer = r.Ceremony;
+      if(!byCer.has(cer)) byCer.set(cer, new Map());
+      const m = byCer.get(cer);
+      if(!m.has(r.CanonicalCategory)) m.set(r.CanonicalCategory, {films:new Map(), names:new Set()});
+      const cell = m.get(r.CanonicalCategory);
+      const filmKey = r.FilmId && r.FilmId.trim() !== '' ? r.FilmId : `title::${(r.Film||'').trim()}`;
+      if(!cell.films.has(filmKey)) cell.films.set(filmKey, (r.Film||'').trim());
+      const who = (r.Name||r.Nominees||'').trim();
+      if(who) cell.names.add(who);
+    }
+
+    // Keep only ceremonies that have ALL selected categories present
+    const complete = [];
+    for(const [cer, cmap] of byCer){
+      if(selected.every(k => cmap.has(k))){
+        // Count distinct films across selected categories (union)
+        const union = new Map();
+        for(const k of selected){
+          const cell = cmap.get(k);
+          for(const [fk, title] of cell.films.entries()){
+            if(!union.has(fk)) union.set(fk, title);
+          }
+        }
+        complete.push({cer, cmap, distinct: union.size});
+      }
+    }
+
+    // Sort: distinct desc, then ceremony desc (most recent first)
+    complete.sort((a,b)=>{
+      if(b.distinct !== a.distinct) return b.distinct - a.distinct;
+      return b.cer - a.cer;
+    });
+
+    // Render header
+    const selLabels = selected.map(k => BIG8.find(x=>x.key===k)?.label || k);
+    thead.innerHTML = `<tr><th>Year</th>${selLabels.map(l=>`<th>${escapeHTML(l)}</th>`).join('')}</tr>`;
+
+    // Render body
+    const rowsHTML = [];
+    for(const row of complete){
+      const year = ceremonyById.get(row.cer) ?? row.cer;
+      const cells = [ `<td><span class=\"badge\">${row.cer}</span> ${escapeHTML(String(year))} <span class=\"count\">(${row.distinct})</span></td>` ];
+      for(const key of selected){
+        const cell = row.cmap.get(key);
+        const films = Array.from(cell.films.values());
+        const isTie = films.length > 1;
+        const names = Array.from(cell.names);
+        const tooltip = names.length ? ` title=\"Winner(s): ${escapeHTML(names.join(' | '))}\"` : '';
+        const titleText = films.join(' / ');
+        const tieBadge = isTie ? ' <span class="tie" title="Tie">(tie)</span>' : '';
+        // escape only the text part, append tie badge as real HTML
+        cells.push(`<td${tooltip}>${escapeHTML(titleText)}${tieBadge}</td>`);
+      }
+      rowsHTML.push(`<tr>${cells.join('')}</tr>`);
+    }
+    tbody.innerHTML = rowsHTML.join('');
+
+    if(complete.length === 0){
+      tbody.innerHTML = `<tr><td colspan="${selected.length+1}">No ceremonies contain all selected categories.</td></tr>`;
+    }
+  }
+
+  function escapeHTML(str){
+    if(str == null) return '';
+    return String(str)
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;')
+      .replaceAll('"','&quot;');
+  }
+
+  // Kick off
+  tryFetchDefault();
+})();
+</script>
+</body>
+</html>
